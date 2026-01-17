@@ -9,7 +9,11 @@ This is a custom CLI agent created with Agent Forge. It provides automated assis
 ## Terminal Output
 
 <details>
-  <summary>📸 Core Coder V5 — Full Terminal Screenshot (click to expand)</summary>
+  <summary>
+    <img src="./Core_coder_v5_terminal_test_1.png" alt="Preview" height="120">
+    <br>
+    🔽 Click to view full-size screenshot
+  </summary>
 
   <img src="./Core_coder_v5_terminal_test_1.png" alt="Core Coder V5 Terminal Output" width="400">
 </details>
