@@ -6,6 +6,14 @@ A custom CLI agent
 
 This is a custom CLI agent created with Agent Forge. It provides automated assistance and can be extended with custom tools and knowledge.
 
+## Terminal Output
+
+<details>
+  <summary>📸 Core Coder V5 — Full Terminal Screenshot (click to expand)</summary>
+
+  <img src="./Core_coder_v5_terminal_test_1.png" alt="Core Coder V5 Terminal Output" width="400">
+</details>
+
 ## Installation
 
 1. Ensure you have the langchain-agent-base framework available:
@@ -32,29 +40,35 @@ cp .env.template .env
 
 ## Usage
 
-### Basic Usage
+### Interactive Mode (Recommended)
 
 ```bash
-python core_coder_v5.py "Your query here"
+python cli.py
 ```
 
-### Interactive Mode
+### With a Specific Project Directory
 
 ```bash
-python core_coder_v5.py --interactive
+python cli.py /path/to/project
 ```
 
-### With Memory
+### Without Memory
 
 ```bash
-python core_coder_v5.py --memory --interactive
+python cli.py --no-memory
 ```
 
-### With RAG (Document Search)
+## CLI Commands
 
-```bash
-python core_coder_v5.py --rag "Query about stored knowledge"
-```
+While in interactive mode:
+- **//tools** - List all available tools
+- **//status** - Show agent status
+- **//config** - Show full configuration  
+- **//model <provider> <name>** - Switch provider and model
+- **//memory status|clear|show** - Manage conversation memory
+- **//rag status|search <query>** - RAG knowledge base
+- **//ollama list** - List available Ollama models
+- **//groq list** - List available Groq models
 
 ## Knowledge Base
 
@@ -77,34 +91,20 @@ This agent is built using the **LangChain Agent Base** framework which provides:
 
 ## Configuration
 
-This agent includes a `agent_config.json` file with all settings:
-
-```python
-from src.agent_config import AgentConfig, create_agent_from_config
-
-# Load config and create agent
-config = AgentConfig.load('agent_config.json')
-agent = create_agent_from_config(config)
-
-# Or customize on the fly
-agent = create_agent_from_config(config, 
-    enable_memory=True,
-    system_prompt="Custom instructions..."
-)
-```
+All settings are stored in `agent_config.json`. You can edit it directly or use CLI commands.
 
 The config includes:
-- System prompt with customizable opening, core instructions, shell, and closing sections
-- Model settings (provider, temperature, max tokens)
-- Feature flags (shell, memory, RAG)
+- Model settings (provider, model_name, temperature)
+- Feature flags (enable_shell, enable_memory, enable_rag)
 - Toolbox selections
-- CLI appearance
+- CLI appearance and ASCII art
+- System prompt
 
 ## Customization
 
 To customize the agent:
 
-1. **Edit System Prompt**: Modify `agent_config.json` or the prompt in the agent file
+1. **Edit Configuration**: Modify `agent_config.json` directly
 2. **Add Tools**: Create new functions with the `@tool` decorator
 3. **Extend Capabilities**: Add more tools to the tools list
 4. **Add Knowledge**: Upload documents to the knowledge/ directory
