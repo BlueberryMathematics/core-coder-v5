@@ -25,6 +25,9 @@ This is a custom CLI agent created with Agent Forge. It provides automated assis
 # Clone or ensure langchain-agent-base is in parent directory
 cd path/to/langchain-agent-base
 
+# Create virtual environment if its not there
+python -m venv venv
+
 # Activate virtual environment
 .\\venv\\Scripts\\Activate.ps1  # Windows PowerShell
 # or
