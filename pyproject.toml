@@ -49,6 +49,9 @@ dependencies = [
     # Environment & utilities
     "python-dotenv>=1.0.0",
     "colorama>=0.4.6",
+    
+    # Development tools
+    "langgraph-cli[inmem]>=0.4.7",
 ]
 
 [project.optional-dependencies]

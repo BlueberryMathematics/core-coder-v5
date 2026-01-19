@@ -6,27 +6,12 @@ A custom CLI agent
 
 This is a custom CLI agent created with Agent Forge. It provides automated assistance and can be extended with custom tools and knowledge.
 
-## Terminal Output
-
-<details>
-  <summary>
-    <img src="./Core_coder_v5_terminal_test_1.png" alt="Preview" height="120">
-    <br>
-    🔽 Click to view full-size screenshot
-  </summary>
-
-  <img src="./Core_coder_v5_terminal_test_1.png" alt="Core Coder V5 Terminal Output" width="400">
-</details>
-
 ## Installation
 
 1. Ensure you have the langchain-agent-base framework available:
 ```bash
 # Clone or ensure langchain-agent-base is in parent directory
 cd path/to/langchain-agent-base
-
-# Create virtual environment if its not there
-python -m venv venv
 
 # Activate virtual environment
 .\\venv\\Scripts\\Activate.ps1  # Windows PowerShell
@@ -67,15 +52,20 @@ python cli.py --no-memory
 
 ## CLI Commands
 
+All //commands are implemented using the CommandRegistry system from langchain-agent-base.
+
 While in interactive mode:
+- **//help** - Show all available commands
 - **//tools** - List all available tools
 - **//status** - Show agent status
 - **//config** - Show full configuration  
-- **//model <provider> <name>** - Switch provider and model
+- **//model <provider> <name>** - Hot-swap provider and model (no restart needed!)
 - **//memory status|clear|show** - Manage conversation memory
 - **//rag status|search <query>** - RAG knowledge base
 - **//ollama list** - List available Ollama models
 - **//groq list** - List available Groq models
+
+Custom commands can be added by editing langchain-agent-base/src/commands.py.
 
 ## Knowledge Base
 
@@ -87,7 +77,20 @@ This agent includes 3 knowledge files across 4 categories:
 
 ## Architecture
 
-This agent is built using the **LangChain Agent Base** framework which provides:
+This agent uses a **template-based architecture** for maximum maintainability:
+
+- **cli.py**: Copied from langchain-agent-base/src/cli_template.py
+- **agent_config.json**: All agent-specific configuration (single source of truth)
+- **//commands**: Defined in langchain-agent-base/src/commands.py using CommandRegistry
+- **langchain-agent-base**: Core framework with tools, memory, RAG, and middleware
+
+This design means:
+- ✅ No code duplication between JS and Python
+- ✅ Updates to langchain-agent-base automatically improve all agents
+- ✅ Easy to test and maintain commands in one place
+- ✅ All customization via JSON configuration
+
+### Framework Features
 
 - ⚡ **Groq Integration**: 10x faster inference with gpt-oss-120b
 - 🧠 **Persistent Memory**: Conversation history with Qdrant storage

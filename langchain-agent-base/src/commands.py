@@ -337,3 +337,241 @@ def create_agent_commands() -> List[Callable]:
         return "✅ Agent is running and ready."
     
     return [agent_status]
+
+
+def create_cli_agent_commands(agent_instance, cli_instance, agent_config: dict, simple_memory, save_config_fn: Callable) -> List[Callable]:
+    """
+    Create CLI-specific agent commands with access to runtime instances.
+    These are the //commands used in the interactive CLI.
+    
+    Args:
+        agent_instance: The agent instance (for list_tools, etc.)
+        cli_instance: The CLI instance (for enable_memory, session_id, etc.)
+        agent_config: The AGENT_CONFIG dictionary
+        simple_memory: The SimpleConversationMemory instance
+        save_config_fn: Function to save config changes
+    
+    Returns:
+        List of command functions ready to be registered
+    """
+    
+    # Help command - formatted like the old version
+    @command("help", "Show help information", "//help [command_name]")
+    def show_help(command_name: str = None) -> str:
+        """Show formatted help information."""
+        if command_name:
+            # Show help for specific command (use the registry's built-in logic)
+            # This will be handled by the registry but we need to implement it here
+            return f"Help for specific commands: Use //list to see all commands"
+        
+        # Full formatted help display (matching old design exactly)
+        result = "\n" + "="*70 + "\n"
+        result += f"  {agent_config.get('name', 'Agent')} - Help\n"
+        result += "="*70 + "\n\n"
+        
+        result += "Basic Commands:\n"
+        result += "  exit, quit, q  - Exit the CLI\n"
+        result += "  clear          - Clear the screen\n"
+        result += "  help           - Show this help message\n\n"
+        
+        result += "Special Commands (// prefix):\n"
+        result += "  //tools        - List all available tools\n"
+        result += "  //status       - Show agent status and configuration\n"
+        result += "  //config       - Show full configuration\n"
+        result += "  //ollama list  - List available Ollama models\n"
+        result += "  //groq list    - List available Groq models\n"
+        result += "  //model <provider> <name> - Switch provider and model\n"
+        result += "  //memory status|clear|show - Manage conversation memory\n"
+        result += "  //rag status|search <query> - RAG knowledge base\n"
+        result += "  //clear        - Clear the screen\n"
+        result += "  //help         - Show this help\n\n"
+        
+        result += "Agent Features:\n"
+        result += f"  - Provider: {agent_config.get('provider', 'unknown')}\n"
+        result += f"  - Model: {agent_config.get('model_name', 'unknown')}\n"
+        result += f"  - Temperature: {agent_config.get('temperature', 0.0)}\n"
+        result += f"  - Memory: {'Enabled' if cli_instance.enable_memory else 'Disabled'}\n"
+        
+        # Show message count if memory is enabled
+        if simple_memory and cli_instance.enable_memory:
+            history = simple_memory.get_history(cli_instance.session_id)
+            if history:
+                result += f"    └─ Messages in context: {len(history)}\n"
+        
+        result += f"  - RAG: {'Enabled' if agent_config.get('enable_rag') else 'Disabled'}\n"
+        
+        # Show tool count
+        try:
+            tool_count = len(agent_instance.tools) if hasattr(agent_instance, 'tools') else 0
+            result += f"  - Tools: {tool_count} available\n"
+        except:
+            result += "  - Tools: Available\n"
+        
+        result += "\n" + "="*70
+        return result
+    
+    # Tools command
+    @command("tools", "List all available tools")
+    def list_tools() -> str:
+        try:
+            tools = agent_instance.list_tools()
+            if tools:
+                result = "\n╔════════════════════════════════════════════════════════════╗\n"
+                result += "║                    🛠️  Available Tools                    ║\n"
+                result += "╚════════════════════════════════════════════════════════════╝\n\n"
+                for i, tool_name in enumerate(tools, 1):
+                    result += f"{i:4}. {tool_name}\n"
+                result += f"\nTotal: {len(tools)} tools loaded"
+                return result
+            else:
+                return "No tools currently loaded"
+        except Exception as e:
+            return f"Unable to list tools: {e}"
+    
+    # Status command
+    @command("status", "Show agent status and configuration")
+    def show_status() -> str:
+        result = "\n╔════════════════════════════════════════════════════════════╗\n"
+        result += "║                    Agent Status                            ║\n"
+        result += "╚════════════════════════════════════════════════════════════╝\n\n"
+        result += f"Name:        {agent_config.get('name', 'Agent')}\n"
+        result += f"Provider:    {agent_config.get('provider', 'unknown')}\n"
+        result += f"Model:       {agent_config.get('model_name', 'unknown')}\n"
+        result += f"Temperature: {agent_config.get('temperature', 0.0)}\n"
+        result += f"Memory:      {'Enabled' if cli_instance.enable_memory else 'Disabled'}\n"
+        result += f"RAG:         {'Enabled' if agent_config.get('enable_rag') else 'Disabled'}\n"
+        result += f"Session:     {cli_instance.session_id}\n"
+        return result
+    
+    # Model command
+    @command("model", "Switch model and provider", "//model <provider> <model_name>")
+    def switch_model(provider: str = None, model: str = None) -> str:
+        if not provider or not model:
+            return f"""Current provider: {agent_config.get('provider', 'unknown')}
+Current model: {agent_config.get('model_name', 'unknown')}
+
+Usage: //model <provider> <model_name>
+Example: //model ollama qwen3:4b
+Example: //model groq llama-3.3-70b-versatile
+
+Use //groq list or //ollama list to see available models"""
+        
+        if provider.lower() not in ['groq', 'ollama']:
+            return f"Invalid provider: {provider}. Available: groq, ollama"
+        
+        agent_config['provider'] = provider.lower()
+        agent_config['model_name'] = model
+        save_config_fn()
+        cli_instance.reinitialize_model()
+        return f"✓ Switched to {provider} / {model}"
+    
+    # Memory commands
+    @command("memory", "Manage conversation memory", "//memory <status|clear|show>")
+    def memory_cmd(action: str = "status") -> str:
+        if action == "status":
+            result = "\nMemory Status:\n"
+            result += f"  Enabled: {cli_instance.enable_memory}\n"
+            if simple_memory:
+                history = simple_memory.get_history(cli_instance.session_id)
+                result += f"  Messages: {len(history)}\n"
+            return result
+        elif action == "clear":
+            if simple_memory:
+                simple_memory.clear(cli_instance.session_id)
+                return "✓ Memory cleared"
+            return "Memory not available"
+        elif action == "show":
+            if simple_memory:
+                history = simple_memory.get_history(cli_instance.session_id)
+                if history:
+                    result = f"\nConversation History ({len(history)} messages):\n"
+                    for i, msg in enumerate(history[-5:], 1):
+                        result += f"  {i}. You: {msg['message'][:50]}...\n"
+                        result += f"     Agent: {msg['response'][:50]}...\n"
+                    return result
+                return "No conversation history"
+            return "Memory not available"
+        return f"Unknown memory action: {action}"
+    
+    # Ollama command
+    @command("ollama", "Manage Ollama models", "//ollama <list|info>")
+    def ollama_cmd(action: str = "list") -> str:
+        if action == "list":
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ["ollama", "list"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if result.returncode == 0:
+                    return "\nAvailable Ollama Models:\n" + result.stdout
+                return f"Error listing Ollama models: {result.stderr}"
+            except FileNotFoundError:
+                return "Ollama is not installed or not in PATH"
+            except Exception as e:
+                return f"Error: {e}"
+        return f"Unknown ollama action: {action}"
+    
+    # Groq command
+    @command("groq", "Manage Groq models", "//groq list")
+    def groq_cmd(action: str = "list") -> str:
+        if action == "list":
+            result = "\nAvailable Groq Models:\n"
+            result += "  • llama-3.3-70b-versatile\n"
+            result += "  • llama-3.1-70b-versatile\n"
+            result += "  • mixtral-8x7b-32768\n"
+            result += "  • gemma2-9b-it\n"
+            result += "\nUse: //model groq <model_name>"
+            return result
+        return f"Unknown groq action: {action}"
+    
+    # RAG command
+    @command("rag", "Manage RAG knowledge base", "//rag <status|search> [query]")
+    def rag_cmd(action: str = "status", query: str = None) -> str:
+        if action == "status":
+            rag_enabled = agent_config.get('enable_rag', False)
+            result = "\nRAG Status:\n"
+            result += f"  Enabled: {rag_enabled}\n"
+            if rag_enabled:
+                result += "  Knowledge base: Active\n"
+            else:
+                result += "  To enable: Set enable_rag: true in config"
+            return result
+        elif action == "search":
+            if not query:
+                return "Usage: //rag search <query>"
+            # TODO: Implement RAG search when RAG is fully integrated
+            return f"RAG search for: {query}\n(RAG search not yet implemented)"
+        return f"Unknown rag action: {action}"
+    
+    # Clear command
+    @command("clear", "Clear the screen")
+    def clear_screen() -> str:
+        import os
+        os.system('cls' if os.name == 'nt' else 'clear')
+        return ""
+    
+    # Config command
+    @command("config", "Show full configuration")
+    def show_config() -> str:
+        result = "\n╔════════════════════════════════════════════════════════════╗\n"
+        result += "║                  ⚙️  Agent Configuration                   ║\n"
+        result += "╚════════════════════════════════════════════════════════════╝\n\n"
+        result += "Core Settings:\n"
+        result += f"  Name:        {agent_config.get('name', 'N/A')}\n"
+        result += f"  Provider:    {agent_config.get('provider', 'unknown')}\n"
+        result += f"  Model:       {agent_config.get('model_name', 'unknown')}\n"
+        result += f"  Temperature: {agent_config.get('temperature', 0.0)}\n\n"
+        result += "Features:\n"
+        result += f"  Memory: {'✓ Enabled' if agent_config.get('enable_memory') else '✗ Disabled'}\n"
+        result += f"  RAG:    {'✓ Enabled' if agent_config.get('enable_rag') else '✗ Disabled'}\n"
+        result += f"  Shell:  {'✓ Enabled' if agent_config.get('enable_shell') else '✗ Disabled'}\n\n"
+        result += "Toolboxes:\n"
+        for tb in agent_config.get('toolboxes', []):
+            result += f"  • {tb}\n"
+        return result
+    
+    # Return all commands (help must be first to override the built-in)
+    return [show_help, list_tools, show_status, switch_model, memory_cmd, ollama_cmd, groq_cmd, rag_cmd, clear_screen, show_config]
