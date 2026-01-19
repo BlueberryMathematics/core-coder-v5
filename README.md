@@ -2,6 +2,8 @@
 
 A custom CLI agent
 
+Core_coder_v5_terminal_test_1.png
+
 ## Overview
 
 This is a custom CLI agent created with Agent Forge. It provides automated assistance and can be extended with custom tools and knowledge.
