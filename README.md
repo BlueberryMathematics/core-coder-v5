@@ -2,7 +2,11 @@
 
 A custom CLI agent
 
-Core_coder_v5_terminal_test_1.png
+<details>
+  <summary>📸 Core Coder V5 — Terminal Screenshot</summary>
+
+  <img src="./Core_coder_v5_terminal_test_1.png" alt="Core Coder V5 Terminal Screenshot" width="400">
+</details>
 
 ## Overview
 
