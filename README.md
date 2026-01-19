@@ -2,11 +2,9 @@
 
 A custom CLI agent
 
-<details>
-  <summary>📸 Core Coder V5 — Terminal Screenshot</summary>
-
-  <img src="./Core_coder_v5_terminal_test_1.png" alt="Core Coder V5 Terminal Screenshot" width="400">
-</details>
+<div style="max-height: 900px; overflow-y: auto; border: 1px solid #444; padding: 8px;">
+  <img src="./Core_coder_v5_terminal_test_1.png" alt="Core Coder V5 Terminal Screenshot">
+</div>
 
 ## Overview
 
