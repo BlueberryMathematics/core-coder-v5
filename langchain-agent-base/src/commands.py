@@ -27,6 +27,7 @@ Usage:
 """
 
 import inspect
+import os
 from typing import Dict, Callable, Any, Optional, List, get_type_hints
 from dataclasses import dataclass, field
 from functools import wraps
@@ -376,6 +377,7 @@ def create_cli_agent_commands(agent_instance, cli_instance, agent_config: dict, 
         
         result += "Special Commands (// prefix):\n"
         result += "  //tools        - List all available tools\n"
+        result += "  //system_prompt [new_prompt_optional] - Show or set the system prompt\n"
         result += "  //status       - Show agent status and configuration\n"
         result += "  //config       - Show full configuration\n"
         result += "  //ollama list  - List available Ollama models\n"
@@ -428,6 +430,44 @@ def create_cli_agent_commands(agent_instance, cli_instance, agent_config: dict, 
         except Exception as e:
             return f"Unable to list tools: {e}"
     
+    # System Prompt command
+    @command("system_prompt", "Show or set the system prompt", "//system_prompt [new_prompt]")
+    def system_prompt_cmd(new_prompt: str = None) -> str:
+        if new_prompt:
+            agent_config['system_prompt'] = new_prompt
+            save_config_fn()
+            cli_instance.reinitialize_model()  # Rebuild agent with new prompt
+            return f"✓ System prompt updated and agent reinitialized"
+        else:
+            # Show the full assembled system prompt (all parts like in UI)
+            result = "\n╔════════════════════════════════════════════════════════════╗\n"
+            result += "║              📋 Agent System Prompt (Full)                ║\n"
+            result += "╚════════════════════════════════════════════════════════════╝\n\n"
+            
+            # Show all parts that get assembled into the actual prompt
+            if agent_config.get('prompt_opening'):
+                result += "═══ Opening (before your prompt) ═══\n"
+                result += agent_config['prompt_opening'].replace('{agentName}', agent_config.get('name', 'Agent'))
+                result += "\n\n"
+            
+            result += "═══ Your Core Instructions ═══\n"
+            result += agent_config.get('system_prompt', 'Not set')
+            result += "\n\n"
+            
+            if agent_config.get('enable_shell', True) and agent_config.get('prompt_shell'):
+                result += "═══ Shell Instructions (when enabled) ═══\n"
+                result += agent_config['prompt_shell']
+                result += "\n\n"
+            
+            if agent_config.get('prompt_closing'):
+                result += "═══ Closing ═══\n"
+                result += agent_config['prompt_closing']
+                result += "\n\n"
+            
+            result += "Note: System context (OS, Shell, Python info) is added automatically at startup."
+            
+            return result
+    
     # Status command
     @command("status", "Show agent status and configuration")
     def show_status() -> str:
@@ -441,6 +481,8 @@ def create_cli_agent_commands(agent_instance, cli_instance, agent_config: dict, 
         result += f"Memory:      {'Enabled' if cli_instance.enable_memory else 'Disabled'}\n"
         result += f"RAG:         {'Enabled' if agent_config.get('enable_rag') else 'Disabled'}\n"
         result += f"Session:     {cli_instance.session_id}\n"
+        result += f"Messages in context: {len(simple_memory.get_history(cli_instance.session_id)) if simple_memory and cli_instance.enable_memory else 0}\n"
+        result += f"Current working directory: {os.getcwd()}\n"
         return result
     
     # Model command
@@ -574,4 +616,4 @@ Use //groq list or //ollama list to see available models"""
         return result
     
     # Return all commands (help must be first to override the built-in)
-    return [show_help, list_tools, show_status, switch_model, memory_cmd, ollama_cmd, groq_cmd, rag_cmd, clear_screen, show_config]
+    return [show_help, list_tools, system_prompt_cmd, show_status, switch_model, memory_cmd, ollama_cmd, groq_cmd, rag_cmd, clear_screen, show_config]
