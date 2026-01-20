@@ -2,10 +2,6 @@
 
 A custom CLI agent
 
-<div style="max-height: 900px; overflow-y: auto; border: 1px solid #444; padding: 8px;">
-  <img src="./Core_coder_v5_terminal_test_1.png" alt="Core Coder V5 Terminal Screenshot">
-</div>
-
 ## Overview
 
 This is a custom CLI agent created with Agent Forge. It provides automated assistance and can be extended with custom tools and knowledge.
