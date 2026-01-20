@@ -523,9 +523,15 @@ Current message: {message}"""
                     enhanced_message = message
                 
                 # Get response
+                # Extract callbacks from kwargs and put in config
+                callbacks = kwargs.pop('callbacks', None)
+                config = kwargs.pop('config', {})
+                if callbacks:
+                    config['callbacks'] = callbacks
+                
                 response = self.agent.invoke({
                     "messages": [{"role": "user", "content": enhanced_message}]
-                }, **kwargs)
+                }, config=config if config else None)
                 
                 response_content = response["messages"][-1].content
                 
@@ -544,9 +550,15 @@ Current message: {message}"""
                 loop.close()
         else:
             # Standard chat without memory
+            # Extract callbacks from kwargs and put in config
+            callbacks = kwargs.pop('callbacks', None)
+            config = kwargs.pop('config', {})
+            if callbacks:
+                config['callbacks'] = callbacks
+            
             response = self.agent.invoke({
                 "messages": [{"role": "user", "content": message}]
-            }, **kwargs)
+            }, config=config if config else None)
             
             return response["messages"][-1].content
     
@@ -621,9 +633,15 @@ Current message: {message}"""
         # Use stream to capture tool calls as they happen
         final_response = None
         
+        # Extract callbacks from kwargs and put in config
+        callbacks = kwargs.pop('callbacks', None)
+        config = kwargs.pop('config', {})
+        if callbacks:
+            config['callbacks'] = callbacks
+        
         for event in self.agent.stream({
             "messages": [{"role": "user", "content": enhanced_message}]
-        }, stream_mode="updates", **kwargs):
+        }, stream_mode="updates", config=config if config else None):
             # The stream yields updates - look for tool messages and AI messages
             if "messages" in event:
                 for msg in event["messages"]:

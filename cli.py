@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent / "langchain-agent-base" / "src"))
 sys.path.insert(0, str(Path(__file__).parent))
 
 from langchain_core.tools import tool
+from langchain_core.callbacks import BaseCallbackHandler
 from base import Agent
 from toolbox import get_toolbox
 from commands import CommandRegistry, command, create_cli_agent_commands
@@ -52,7 +53,22 @@ def load_config() -> dict:
     """Load agent configuration from JSON file."""
     if CONFIG_FILE.exists():
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            config = json.load(f)
+            
+            # Add default safe commands whitelist if not present
+            if 'safe_commands' not in config:
+                config['safe_commands'] = [
+                    'date', 'Get-Date', 'time', 'pwd', 'Get-Location',
+                    'ls', 'dir', 'Get-ChildItem', 'whoami', 'hostname',
+                    'echo', 'Write-Output', 'cat', 'Get-Content',
+                    'env', 'Get-Variable', 'python --version', 'node --version'
+                ]
+            
+            # Add whitelist_enabled flag if not present (default: True)
+            if 'whitelist_enabled' not in config:
+                config['whitelist_enabled'] = True
+            
+            return config
     else:
         raise FileNotFoundError(f"Configuration file not found: {CONFIG_FILE}")
 
@@ -99,6 +115,182 @@ class SimpleConversationMemory:
         return len(self.history.get(session_id, []))
 
 _simple_memory = SimpleConversationMemory()
+
+
+# ============================================================================
+# CONFIRMATION CALLBACK HANDLER
+# ============================================================================
+
+class ConfirmationCallbackHandler(BaseCallbackHandler):
+    """Callback handler that prompts for confirmation before tool execution."""
+    
+    def __init__(self, confirm_terminal: bool = False, confirm_tools: bool = False, colors=None):
+        self.confirm_terminal = confirm_terminal
+        self.confirm_tools = confirm_tools
+        self.colors = colors
+        self._pending_tools = []  # Collect all tools in current batch
+        self._user_approved = None  # Store user's decision
+        self._batch_started = False
+        self._confirmation_shown = False
+        self._showing_prompt = False  # Lock to prevent duplicate prompts
+        self._safe_commands = AGENT_CONFIG.get('safe_commands', [])
+    
+    def _is_shell_tool(self, tool_name: str, tool_input: dict) -> bool:
+        """Check if tool is a shell/terminal tool."""
+        shell_keywords = [
+            'shell', 'terminal', 'command', 'powershell', 'bash', 'cmd', 'run_',
+            'execute', 'system', 'python_info', 'get_system', 'get_python',
+            'install', 'pip', 'npm', 'git'
+        ]
+        tool_name_lower = tool_name.lower()
+        return any(keyword in tool_name_lower for keyword in shell_keywords)
+    
+    def _is_safe_command(self, command: str) -> bool:
+        """Check if command is in the safe whitelist."""
+        if not command:
+            return False
+        
+        # Extract base command (first word)
+        base_cmd = command.strip().split()[0] if command.strip() else ''
+        
+        # Check against whitelist (case-insensitive)
+        for safe_cmd in self._safe_commands:
+            if base_cmd.lower() == safe_cmd.lower() or command.lower().startswith(safe_cmd.lower()):
+                return True
+        
+        return False
+    
+    def on_tool_start(self, serialized: dict, input_str: str, **kwargs) -> None:
+        """Called when tool execution starts - intercept and ask for confirmation."""
+        tool_name = serialized.get('name', 'unknown')
+        is_shell = self._is_shell_tool(tool_name, {})
+        
+        # Parse input to extract actual command
+        import json
+        actual_input = input_str
+        try:
+            # If input_str is a JSON dict, extract the command
+            if isinstance(input_str, str) and input_str.strip().startswith('{'):
+                input_dict = json.loads(input_str)
+                if 'command' in input_dict:
+                    actual_input = input_dict['command']
+        except:
+            pass  # Keep original input_str if parsing fails
+        
+        # Check if this is a safe whitelisted command (skip confirmation)
+        if is_shell and AGENT_CONFIG.get('whitelist_enabled', True) and self._is_safe_command(actual_input):
+            return  # Skip confirmation for safe commands
+        
+        # Check if confirmation needed
+        needs_confirmation = (
+            (is_shell and self.confirm_terminal) or
+            (not is_shell and self.confirm_tools)
+        )
+        
+        if needs_confirmation:
+            
+            # Add to pending tools list
+            tool_type = "Terminal" if is_shell else "Tool"
+            self._pending_tools.append({
+                'name': tool_name,
+                'input': actual_input,
+                'type': tool_type
+            })
+            
+            # Only the first tool shows the prompt
+            if not self._showing_prompt and not self._confirmation_shown:
+                self._showing_prompt = True  # Lock to prevent others from showing prompt
+                
+                import time
+                time.sleep(0.2)  # Brief pause to collect other tools
+                
+                # Now show all pending tools and ask for confirmation
+                self._confirmation_shown = True
+                
+                if self.colors:
+                    c_warning = self.colors.get('warning')
+                    c_info = self.colors.get('info')
+                    c_success = self.colors.get('success')
+                    c_error = self.colors.get('error')
+                    c_shell = self.colors.get('shell')
+                    c_primary = self.colors.get('primary')
+                    c_accent = self.colors.get('accent')
+                    c_secondary = self.colors.get('secondary')
+                    c_reset = Style.RESET_ALL
+                    
+                    # Show "Agent:" label first
+                    print(f"\n{c_secondary}Agent:{c_reset}")
+                    
+                    # Display all pending tools in a nice box
+                    print(f"{c_warning}╭─ ⚠ Confirmation Required ─────────────────────────────────╮{c_reset}")
+                    print(f"{c_warning}│{c_reset} {c_primary}The agent wants to execute {len(self._pending_tools)} tool(s):{c_reset}")
+                    print(f"{c_warning}├────────────────────────────────────────────────────────────┤{c_reset}")
+                    
+                    for i, tool in enumerate(self._pending_tools, 1):
+                        tool_color = c_shell if tool['type'] == 'Terminal' else c_accent
+                        print(f"{c_warning}│{c_reset} {c_info}{i}.{c_reset} [{tool['type']}] {tool_color}{tool['name']}{c_reset}")
+                        print(f"{c_warning}│{c_reset}    {c_primary}{tool['input']}{c_reset}")
+                    
+                    print(f"{c_warning}╰────────────────────────────────────────────────────────────╯{c_reset}")
+                    
+                    # Prompt for confirmation once for all tools
+                    print(f"\n{c_info}You:{c_reset}")
+                    while True:
+                        response = input(f"{c_warning}Execute ALL these tools? (yes/no): {c_reset}").strip().lower()
+                        
+                        if response in ['yes', 'y']:
+                            print(f"{c_success}✓ Approved - executing all tools...{c_reset}\n")
+                            self._user_approved = True
+                            break
+                        elif response in ['no', 'n']:
+                            print(f"{c_error}✗ Cancelled - blocking all tool execution{c_reset}\n")
+                            self._user_approved = False
+                            # Raise exception to stop all tool execution
+                            raise KeyboardInterrupt("User cancelled tool execution")
+                        else:
+                            print("Please answer 'yes' or 'no'")
+                else:
+                    # Non-colored version
+                    print(f"\nAgent:")
+                    print(f"⚠ Confirmation Required")
+                    print(f"The agent wants to execute {len(self._pending_tools)} tool(s):")
+                    print("─" * 60)
+                    
+                    for i, tool in enumerate(self._pending_tools, 1):
+                        print(f"{i}. [{tool['type']}] {tool['name']}")
+                        print(f"   {tool['input']}")
+                    
+                    print("─" * 60)
+                    print("\nYou:")
+                    
+                    while True:
+                        response = input(f"Execute ALL these tools? (yes/no): ").strip().lower()
+                        
+                        if response in ['yes', 'y']:
+                            print("✓ Approved - executing all tools...\n")
+                            self._user_approved = True
+                            break
+                        elif response in ['no', 'n']:
+                            print("✗ Cancelled - blocking all tool execution\n")
+                            self._user_approved = False
+                            raise KeyboardInterrupt("User cancelled tool execution")
+                        else:
+                            print("Please answer 'yes' or 'no'")
+            else:
+                # Subsequent tools: wait for the first tool to get user decision, then apply it
+                import time
+                while self._user_approved is None:
+                    time.sleep(0.05)  # Wait for user response
+                
+                if self._user_approved is False:
+                    raise KeyboardInterrupt("User cancelled tool execution")
+    
+    def on_chain_end(self, outputs, **kwargs) -> None:
+        """Reset confirmation state after chain completes."""
+        self._pending_tools = []
+        self._confirmation_shown = False
+        self._user_approved = None
+        self._showing_prompt = False
 
 
 # ============================================================================
@@ -238,28 +430,30 @@ class Colors:
         cli_appearance = AGENT_CONFIG.get('cli_appearance', {})
         colors = AGENT_CONFIG.get('colors', {})
         
-        if colors and scheme_name == 'custom':
-            # Build custom scheme from config colors
-            self.scheme = self._build_custom_scheme(colors)
+        if colors:
+            # Build custom scheme from config colors (from UI export)
+            self.scheme = {
+                "primary": self._hex_to_ansi(colors.get('primary', '#ffffff')),
+                "secondary": self._hex_to_ansi(colors.get('secondary', '#aaaaaa')),
+                "success": self._hex_to_ansi(colors.get('success', '#00ff00')),
+                "error": self._hex_to_ansi(colors.get('error', '#ff0000')),
+                "warning": self._hex_to_ansi(colors.get('warning', '#ffff00')),
+                "info": self._hex_to_ansi(colors.get('info', '#00ffff')),
+                "tool": self._hex_to_ansi(colors.get('tool', '#ff00ff')),
+                "shell": self._hex_to_ansi(colors.get('shell', '#00ffff')),
+                "accent": self._hex_to_ansi(colors.get('accent', '#00ff00')),
+                # Aliases for backward compatibility
+                "agent": self._hex_to_ansi(colors.get('primary', '#ffffff')),
+                "user": self._hex_to_ansi(colors.get('info', '#00ffff')),
+                "system": self._hex_to_ansi(colors.get('secondary', '#aaaaaa')),
+                "command": self._hex_to_ansi(colors.get('accent', '#00ff00')),
+                "output": self._hex_to_ansi(colors.get('success', '#00ff00')),
+                "dim": Style.DIM,
+                "reset": Style.RESET_ALL
+            }
         else:
+            # Fallback to default scheme if no colors in config
             self.scheme = self._get_default_scheme(scheme_name)
-    
-    def _build_custom_scheme(self, colors):
-        """Build a color scheme from config colors."""
-        return {
-            "agent": self._hex_to_ansi(colors.get('primary', '#00ff41')),
-            "user": self._hex_to_ansi(colors.get('info', colors.get('secondary', '#ffffff'))),
-            "system": self._hex_to_ansi(colors.get('secondary', '#ffffff')),
-            "command": self._hex_to_ansi(colors.get('accent', '#00d9ff')),
-            "tool": self._hex_to_ansi(colors.get('tool', '#FFB86C')),
-            "shell": self._hex_to_ansi(colors.get('shell', '#00DDDD')),
-            "output": self._hex_to_ansi(colors.get('success', '#00FF00')),
-            "error": self._hex_to_ansi(colors.get('error', '#ff5555')),
-            "success": self._hex_to_ansi(colors.get('success', '#55ff55')),
-            "warning": self._hex_to_ansi(colors.get('warning', '#ffff55')),
-            "dim": Style.DIM,
-            "reset": Style.RESET_ALL
-        }
     
     def _hex_to_ansi(self, hex_color):
         """Convert hex color to ANSI escape sequence."""
@@ -321,6 +515,10 @@ class AgentCLI:
         self.enable_memory = enable_memory
         self.session_id = session_id or f"session_{AGENT_CONFIG.get('name', 'agent')}"
         
+        # Confirmation settings
+        self.confirm_terminal = AGENT_CONFIG.get("confirm_terminal", False)
+        self.confirm_tools = AGENT_CONFIG.get("confirm_tools", False)
+        
         # Setup colors
         cli_appearance = AGENT_CONFIG.get("cli_appearance", {})
         scheme_name = cli_appearance.get("color_scheme", "default")
@@ -346,10 +544,31 @@ class AgentCLI:
             enable_memory=enable_memory
         )
         
+        # Create confirmation callback handler
+        self.confirmation_handler = ConfirmationCallbackHandler(
+            confirm_terminal=self.confirm_terminal,
+            confirm_tools=self.confirm_tools,
+            colors=self.colors
+        )
+        
         # Setup command registry
         self.commands = setup_agent_commands(self.agent, self)
         
         print(f"{self.colors.get('success')}Agent ready!{self.c_reset}\n")
+    
+    def update_confirmation_settings(self, confirm_terminal: bool = None, confirm_tools: bool = None):
+        """Update confirmation settings and recreate callback handler."""
+        if confirm_terminal is not None:
+            self.confirm_terminal = confirm_terminal
+        if confirm_tools is not None:
+            self.confirm_tools = confirm_tools
+        
+        # Recreate callback handler with new settings
+        self.confirmation_handler = ConfirmationCallbackHandler(
+            confirm_terminal=self.confirm_terminal,
+            confirm_tools=self.confirm_tools,
+            colors=self.colors
+        )
     
     def reinitialize_model(self):
         """Reinitialize the agent with the new model/provider."""
@@ -382,25 +601,35 @@ class AgentCLI:
         # Display banner
         print_banner()
         
-        # Display agent info
+        # Display agent info with curved borders
         display_name = AGENT_CONFIG.get('name', 'Agent')
-        print(f"{self.c_sys}{'='*70}")
-        print(f"  {display_name} - Interactive Mode")
-        print(f"  Provider: {AGENT_CONFIG.get('provider', 'unknown')} | Model: {AGENT_CONFIG.get('model_name', 'unknown')}")
-        print(f"  Memory: {'ON' if self.enable_memory else 'OFF'} | RAG: {'ON' if AGENT_CONFIG.get('enable_rag') else 'OFF'}")
-        print(f"{'='*70}{self.c_reset}")
+        c_primary = self.colors.get('primary')
+        c_secondary = self.colors.get('secondary')
+        c_accent = self.colors.get('accent')
+        c_info = self.colors.get('info')
+        c_success = self.colors.get('success')
+        c_warning = self.colors.get('warning')
+        c_reset = self.c_reset
+        
+        print(f"{c_accent}╭─────────────────────────────────────────────────────────────────────╮{c_reset}")
+        print(f"{c_accent}│{c_reset} {c_primary}{display_name} - Interactive Mode{c_reset}")
+        print(f"{c_accent}├─────────────────────────────────────────────────────────────────────┤{c_reset}")
+        print(f"{c_accent}│{c_reset} {c_secondary}Provider:{c_reset} {c_info}{AGENT_CONFIG.get('provider', 'unknown')}{c_reset} {c_secondary}│{c_reset} {c_secondary}Model:{c_reset} {c_info}{AGENT_CONFIG.get('model_name', 'unknown')}{c_reset}")
+        print(f"{c_accent}│{c_reset} {c_secondary}Memory:{c_reset} {c_success if self.enable_memory else c_warning}{'ON' if self.enable_memory else 'OFF'}{c_reset} {c_secondary}│{c_reset} {c_secondary}RAG:{c_reset} {c_success if AGENT_CONFIG.get('enable_rag') else c_warning}{'ON' if AGENT_CONFIG.get('enable_rag') else 'OFF'}{c_reset}")
+        print(f"{c_accent}│{c_reset} {c_secondary}Confirm:{c_reset} Terminal={c_success if self.confirm_terminal else c_warning}{'ON' if self.confirm_terminal else 'OFF'}{c_reset} {c_secondary}│{c_reset} Tools={c_success if self.confirm_tools else c_warning}{'ON' if self.confirm_tools else 'OFF'}{c_reset}")
+        print(f"{c_accent}╰─────────────────────────────────────────────────────────────────────╯{c_reset}")
         print()
-        print(f"{self.c_sys}Commands:")
-        print("  - Type your message and press Enter")
-        print("  - Type 'exit' or 'quit' to exit")
-        print("  - Type '//help' for special commands (//tools, //status, //config, etc.){self.c_reset}")
+        print(f"{c_secondary}Commands:{c_reset}")
+        print(f"  {c_info}•{c_reset} Type your message and press Enter")
+        print(f"  {c_info}•{c_reset} Type 'exit' or 'quit' to exit")
+        print(f"  {c_info}•{c_reset} Type '//help' for special commands (//tools, //status, //config, etc.)")
         print()
-        print(f"{self.c_sys}{'='*70}{self.c_reset}\n")
+        print(f"{c_accent}{'─' * 70}{c_reset}\n")
         
         while True:
             try:
-                # Get user input
-                user_input = input(f"\n{self.c_user}You: {self.c_reset}").strip()
+                # Get user input with colored label
+                user_input = input(f"\n{self.colors.get('info')}You: {self.c_reset}").strip()
                 
                 if not user_input:
                     continue
@@ -421,24 +650,32 @@ class AgentCLI:
                     os.system('cls' if os.name == 'nt' else 'clear')
                     continue
                 
-                # Send to agent with tool display
+                # Send to agent with tool display and confirmation callback
                 try:
                     result = self.agent.chat_with_tool_display(
                         user_input,
                         session_id=self.session_id,
-                        tool_callback=self.print_tool_output
+                        tool_callback=self.print_tool_output,
+                        callbacks=[self.confirmation_handler]
                     )
                     response = result.get('response', '')
                 except AttributeError:
                     # Fallback if chat_with_tool_display not available
-                    response = self.agent.chat(user_input, session_id=self.session_id)
+                    response = self.agent.chat(
+                        user_input,
+                        session_id=self.session_id,
+                        callbacks=[self.confirmation_handler]
+                    )
                 
                 # Store in memory
                 if self.enable_memory:
                     _simple_memory.add_message(self.session_id, user_input, response)
                 
-                # Print agent response
-                print(f"\n{self.c_agent}Agent: {self.c_reset}")
+                # Reset tool output flag for next interaction
+                self._tools_started = False
+                
+                # Print agent response with colored label
+                print(f"\n{self.colors.get('secondary')}Agent:{self.c_reset} ", end="")
                 self.print_colorized_response(response)
                 
             except KeyboardInterrupt:
@@ -451,7 +688,14 @@ class AgentCLI:
         """Print tool outputs as they happen."""
         c_tool = self.colors.get("tool")
         c_output = self.colors.get("output")
-        print(f"\n{c_tool}╭─ Tool: {tool_name} ─╮{self.c_reset}")
+        c_secondary = self.colors.get("secondary")
+        
+        # Show Agent label before first tool
+        if not hasattr(self, '_tools_started'):
+            self._tools_started = True
+            print(f"\n{c_secondary}Agent:{self.c_reset}")
+        
+        print(f"{c_tool}╭─ Tool: {tool_name} ─╮{self.c_reset}")
         if tool_output:
             lines = str(tool_output).split('\n')
             for line in lines:
@@ -462,7 +706,7 @@ class AgentCLI:
         """Print response with colorized shell commands and output."""
         c_cmd = self.colors.get("command")
         c_out = self.colors.get("output") 
-        c_agent = self.c_agent
+        c_primary = self.colors.get("primary")  # Use primary for agent text
         c_reset = self.c_reset
         
         in_code_block = False
@@ -484,7 +728,7 @@ class AgentCLI:
                 print(f"{c_cmd}{line}{c_reset}")
             # Regular agent text
             else:
-                print(f"{c_agent}{line}{c_reset}")
+                print(f"{c_primary}{line}{c_reset}")
 
 
 # ============================================================================

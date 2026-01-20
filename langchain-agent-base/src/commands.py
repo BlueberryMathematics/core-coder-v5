@@ -32,6 +32,13 @@ from typing import Dict, Callable, Any, Optional, List, get_type_hints
 from dataclasses import dataclass, field
 from functools import wraps
 
+try:
+    from colorama import Style
+except ImportError:
+    class Style:
+        DIM = ''
+        RESET_ALL = ''
+
 
 @dataclass
 class CommandInfo:
@@ -161,14 +168,21 @@ class CommandRegistry:
         Execute a command by name.
         
         Args:
-            command_str: Command string (with or without /)
-            **kwargs: Command arguments
+            command_str: Command string (with or without /) and arguments
+            **kwargs: Additional command arguments
             
         Returns:
             Command result as string
         """
-        # Remove leading / if present
-        command_name = command_str.lstrip('/')
+        # Remove leading / if present and split into parts
+        command_str = command_str.lstrip('/')
+        parts = command_str.split()
+        
+        if not parts:
+            return "No command provided"
+        
+        command_name = parts[0]
+        command_args = parts[1:] if len(parts) > 1 else []
         
         if command_name not in self.commands:
             available = ', '.join(self.commands.keys())
@@ -177,6 +191,14 @@ class CommandRegistry:
         command_info = self.commands[command_name]
         
         try:
+            # Build kwargs from command_args if not already provided
+            if not kwargs and command_args:
+                # Map positional args to parameter names
+                param_names = list(command_info.parameters.keys())
+                for i, arg in enumerate(command_args):
+                    if i < len(param_names):
+                        kwargs[param_names[i]] = arg
+            
             # Validate and prepare arguments
             prepared_kwargs = self._prepare_arguments(command_info, kwargs)
             
@@ -360,129 +382,166 @@ def create_cli_agent_commands(agent_instance, cli_instance, agent_config: dict, 
     @command("help", "Show help information", "//help [command_name]")
     def show_help(command_name: str = None) -> str:
         """Show formatted help information."""
+        c = cli_instance.colors
+        c_primary = c.get('primary')
+        c_accent = c.get('accent')
+        c_secondary = c.get('secondary')
+        c_info = c.get('info')
+        c_success = c.get('success')
+        c_reset = c.get('reset')
+        
         if command_name:
-            # Show help for specific command (use the registry's built-in logic)
-            # This will be handled by the registry but we need to implement it here
-            return f"Help for specific commands: Use //list to see all commands"
+            return f"{c_secondary}Help for specific commands: Use //list to see all commands{c_reset}"
         
-        # Full formatted help display (matching old design exactly)
-        result = "\n" + "="*70 + "\n"
-        result += f"  {agent_config.get('name', 'Agent')} - Help\n"
-        result += "="*70 + "\n\n"
+        # Full formatted help display with colors
+        result = f"\n{c_accent}╭{'─'*68}╮\n"
+        result += f"│  {c_primary}{agent_config.get('name', 'Agent')} - Help{' ' * (62 - len(agent_config.get('name', 'Agent')))}{c_accent}│\n"
+        result += f"╰{'─'*68}╯{c_reset}\n\n"
         
-        result += "Basic Commands:\n"
-        result += "  exit, quit, q  - Exit the CLI\n"
-        result += "  clear          - Clear the screen\n"
-        result += "  help           - Show this help message\n\n"
+        result += f"{c_info}Basic Commands:{c_reset}\n"
+        result += f"{c_secondary}  exit, quit, q  - Exit the CLI{c_reset}\n"
+        result += f"{c_secondary}  clear          - Clear the screen{c_reset}\n"
+        result += f"{c_secondary}  help           - Show this help message{c_reset}\n\n"
         
-        result += "Special Commands (// prefix):\n"
-        result += "  //tools        - List all available tools\n"
-        result += "  //system_prompt [new_prompt_optional] - Show or set the system prompt\n"
-        result += "  //status       - Show agent status and configuration\n"
-        result += "  //config       - Show full configuration\n"
-        result += "  //ollama list  - List available Ollama models\n"
-        result += "  //groq list    - List available Groq models\n"
-        result += "  //model <provider> <name> - Switch provider and model\n"
-        result += "  //memory status|clear|show - Manage conversation memory\n"
-        result += "  //rag status|search <query> - RAG knowledge base\n"
-        result += "  //clear        - Clear the screen\n"
-        result += "  //help         - Show this help\n\n"
+        result += f"{c_info}Special Commands (// prefix):{c_reset}\n"
+        result += f"{c_accent}  //tools{c_reset}        {c_secondary}- List all available tools{c_reset}\n"
+        result += f"{c_accent}  //system_prompt {c_accent}<new_prompt_optional>{c_reset} {c_secondary}- Show or set the system prompt{c_reset}\n"
+        result += f"{c_accent}  //status{c_reset}       {c_secondary}- Show agent status and configuration{c_reset}\n"
+        result += f"{c_accent}  //config{c_reset}       {c_secondary}- Show full configuration{c_reset}\n"
+        result += f"{c_accent}  //confirm      {c_accent}terminal|tools <on|off>{c_reset} {c_secondary}- Control confirmation prompts{c_reset}\n"
+        result += f"{c_accent}  //whitelist    {c_accent}on|off|add|remove{c_reset} {c_secondary}- Manage safe command whitelist{c_reset}\n"
+        result += f"{c_accent}  //ollama       {c_accent}list{c_reset} {c_secondary}- List available Ollama models{c_reset}\n"
+        result += f"{c_accent}  //groq         {c_accent}list{c_reset} {c_secondary}- List available Groq models{c_reset}\n"
+        result += f"{c_accent}  //model        {c_accent}<provider> <name>{c_reset} {c_secondary}- Switch provider and model{c_reset}\n"
+        result += f"{c_accent}  //memory       {c_accent}status|clear|show{c_reset} {c_secondary}- Manage conversation memory{c_reset}\n"
+        result += f"{c_accent}  //rag          {c_accent}status|search <query>{c_reset} {c_secondary}- RAG knowledge base{c_reset}\n"
+        result += f"{c_accent}  //clear{c_reset}        {c_secondary}- Clear the screen{c_reset}\n"
+        result += f"{c_accent}  //help{c_reset}         {c_secondary}- Show this help{c_reset}\n\n"
         
-        result += "Agent Features:\n"
-        result += f"  - Provider: {agent_config.get('provider', 'unknown')}\n"
-        result += f"  - Model: {agent_config.get('model_name', 'unknown')}\n"
-        result += f"  - Temperature: {agent_config.get('temperature', 0.0)}\n"
-        result += f"  - Memory: {'Enabled' if cli_instance.enable_memory else 'Disabled'}\n"
+        result += f"{c_info}Agent Features:{c_reset}\n"
+        result += f"{c_secondary}  - Provider: {c_accent}{agent_config.get('provider', 'unknown')}{c_reset}\n"
+        result += f"{c_secondary}  - Model: {c_accent}{agent_config.get('model_name', 'unknown')}{c_reset}\n"
+        result += f"{c_secondary}  - Temperature: {c_primary}{agent_config.get('temperature', 0.0)}{c_reset}\n"
+        result += f"{c_secondary}  - Memory: {c_success if cli_instance.enable_memory else c.get('warning')}{'Enabled' if cli_instance.enable_memory else 'Disabled'}{c_reset}\n"
         
         # Show message count if memory is enabled
         if simple_memory and cli_instance.enable_memory:
             history = simple_memory.get_history(cli_instance.session_id)
             if history:
-                result += f"    └─ Messages in context: {len(history)}\n"
+                result += f"{c_secondary}    └─ Messages in context: {c_primary}{len(history)}{c_reset}\n"
         
-        result += f"  - RAG: {'Enabled' if agent_config.get('enable_rag') else 'Disabled'}\n"
+        result += f"{c_secondary}  - RAG: {c_success if agent_config.get('enable_rag') else c.get('warning')}{'Enabled' if agent_config.get('enable_rag') else 'Disabled'}{c_reset}\n"
         
         # Show tool count
         try:
             tool_count = len(agent_instance.tools) if hasattr(agent_instance, 'tools') else 0
-            result += f"  - Tools: {tool_count} available\n"
+            result += f"{c_secondary}  - Tools: {c_primary}{tool_count} available{c_reset}\n"
         except:
-            result += "  - Tools: Available\n"
+            result += f"{c_secondary}  - Tools: Available{c_reset}\n"
         
-        result += "\n" + "="*70
+        result += f"\n{c_accent}╰{'─'*68}╯{c_reset}"
         return result
     
     # Tools command
     @command("tools", "List all available tools")
     def list_tools() -> str:
         try:
+            c = cli_instance.colors
+            c_primary = c.get('primary')
+            c_accent = c.get('accent')
+            c_info = c.get('info')
+            c_secondary = c.get('secondary')
+            c_reset = c.get('reset')
+            
             tools = agent_instance.list_tools()
             if tools:
-                result = "\n╔════════════════════════════════════════════════════════════╗\n"
-                result += "║                    🛠️  Available Tools                    ║\n"
-                result += "╚════════════════════════════════════════════════════════════╝\n\n"
+                result = f"\n{c_accent}╭{'─'*62}╮\n"
+                result += f"│{c_primary}                    🛠️  Available Tools                    {c_accent}│\n"
+                result += f"╰{'─'*62}╯{c_reset}\n\n"
                 for i, tool_name in enumerate(tools, 1):
-                    result += f"{i:4}. {tool_name}\n"
-                result += f"\nTotal: {len(tools)} tools loaded"
+                    result += f"{c_secondary}{i:4}.{c_reset} {c_info}{tool_name}{c_reset}\n"
+                result += f"\n{c_accent}Total: {c_primary}{len(tools)}{c_accent} tools loaded{c_reset}"
                 return result
             else:
-                return "No tools currently loaded"
+                return f"{c_secondary}No tools currently loaded{c_reset}"
         except Exception as e:
             return f"Unable to list tools: {e}"
     
     # System Prompt command
     @command("system_prompt", "Show or set the system prompt", "//system_prompt [new_prompt]")
     def system_prompt_cmd(new_prompt: str = None) -> str:
+        # Get colors from CLI instance
+        c = cli_instance.colors
+        c_primary = c.get('primary')
+        c_accent = c.get('accent')
+        c_success = c.get('success')
+        c_info = c.get('info')
+        c_warning = c.get('warning')
+        c_secondary = c.get('secondary')
+        c_reset = c.get('reset')
+        
         if new_prompt:
             agent_config['system_prompt'] = new_prompt
             save_config_fn()
             cli_instance.reinitialize_model()  # Rebuild agent with new prompt
-            return f"✓ System prompt updated and agent reinitialized"
+            return f"{c_success}✓ System prompt updated and agent reinitialized{c_reset}"
         else:
-            # Show the full assembled system prompt (all parts like in UI)
-            result = "\n╔════════════════════════════════════════════════════════════╗\n"
-            result += "║              📋 Agent System Prompt (Full)                ║\n"
-            result += "╚════════════════════════════════════════════════════════════╝\n\n"
+            # Show the full assembled system prompt (all parts like in UI) with colors
+            result = f"\n{c_accent}╭{'─'*62}╮\n"
+            result += f"│{c_primary}              📋 Agent System Prompt (Full)                {c_accent}│\n"
+            result += f"╰{'─'*62}╯{c_reset}\n\n"
             
             # Show all parts that get assembled into the actual prompt
             if agent_config.get('prompt_opening'):
-                result += "═══ Opening (before your prompt) ═══\n"
-                result += agent_config['prompt_opening'].replace('{agentName}', agent_config.get('name', 'Agent'))
+                result += f"{c_info}═══ Opening (before your prompt) ═══{c_reset}\n"
+                result += f"{c_secondary}{agent_config['prompt_opening'].replace('{agentName}', agent_config.get('name', 'Agent'))}{c_reset}"
                 result += "\n\n"
             
-            result += "═══ Your Core Instructions ═══\n"
-            result += agent_config.get('system_prompt', 'Not set')
+            result += f"{c_accent}═══ Your Core Instructions ═══{c_reset}\n"
+            result += f"{c_primary}{agent_config.get('system_prompt', 'Not set')}{c_reset}"
             result += "\n\n"
             
             if agent_config.get('enable_shell', True) and agent_config.get('prompt_shell'):
-                result += "═══ Shell Instructions (when enabled) ═══\n"
-                result += agent_config['prompt_shell']
+                result += f"{c_warning}═══ Shell Instructions (when enabled) ═══{c_reset}\n"
+                result += f"{c_secondary}{agent_config['prompt_shell']}{c_reset}"
                 result += "\n\n"
             
             if agent_config.get('prompt_closing'):
-                result += "═══ Closing ═══\n"
-                result += agent_config['prompt_closing']
+                result += f"{c_success}═══ Closing ═══{c_reset}\n"
+                result += f"{c_secondary}{agent_config['prompt_closing']}{c_reset}"
                 result += "\n\n"
             
-            result += "Note: System context (OS, Shell, Python info) is added automatically at startup."
+            result += f"{Style.DIM}Note: System context (OS, Shell, Python info) is added automatically at startup.{c_reset}\n"
             
             return result
     
     # Status command
     @command("status", "Show agent status and configuration")
     def show_status() -> str:
-        result = "\n╔════════════════════════════════════════════════════════════╗\n"
-        result += "║                    Agent Status                            ║\n"
-        result += "╚════════════════════════════════════════════════════════════╝\n\n"
-        result += f"Name:        {agent_config.get('name', 'Agent')}\n"
-        result += f"Provider:    {agent_config.get('provider', 'unknown')}\n"
-        result += f"Model:       {agent_config.get('model_name', 'unknown')}\n"
-        result += f"Temperature: {agent_config.get('temperature', 0.0)}\n"
-        result += f"Memory:      {'Enabled' if cli_instance.enable_memory else 'Disabled'}\n"
-        result += f"RAG:         {'Enabled' if agent_config.get('enable_rag') else 'Disabled'}\n"
-        result += f"Session:     {cli_instance.session_id}\n"
-        result += f"Messages in context: {len(simple_memory.get_history(cli_instance.session_id)) if simple_memory and cli_instance.enable_memory else 0}\n"
-        result += f"Current working directory: {os.getcwd()}\n"
+        # Get colors from CLI instance
+        c = cli_instance.colors
+        c_primary = c.get('primary')
+        c_accent = c.get('accent')
+        c_success = c.get('success')
+        c_info = c.get('info')
+        c_warning = c.get('warning')
+        c_secondary = c.get('secondary')
+        c_reset = c.get('reset')
+        
+        result = f"\n{c_accent}╭{'─'*62}╮\n"
+        result += f"│{c_primary}                    Agent Status                            {c_accent}│\n"
+        result += f"╰{'─'*62}╯{c_reset}\n\n"
+        result += f"{c_secondary}Name:        {c_primary}{agent_config.get('name', 'Agent')}{c_reset}\n"
+        result += f"{c_secondary}Provider:    {c_accent}{agent_config.get('provider', 'unknown')}{c_reset}\n"
+        result += f"{c_secondary}Model:       {c_accent}{agent_config.get('model_name', 'unknown')}{c_reset}\n"
+        result += f"{c_secondary}Temperature: {c_warning}{agent_config.get('temperature', 0.0)}{c_reset}\n"
+        result += f"{c_secondary}Memory:      {c_success if cli_instance.enable_memory else c_warning}{'Enabled' if cli_instance.enable_memory else 'Disabled'}{c_reset}\n"
+        result += f"{c_secondary}RAG:         {c_success if agent_config.get('enable_rag') else c_warning}{'Enabled' if agent_config.get('enable_rag') else 'Disabled'}{c_reset}\n"
+        result += f"{c_secondary}Confirm:     Terminal={c_success if cli_instance.confirm_terminal else c_warning}{'ON' if cli_instance.confirm_terminal else 'OFF'}{c_reset} | Tools={c_success if cli_instance.confirm_tools else c_warning}{'ON' if cli_instance.confirm_tools else 'OFF'}{c_reset}\n"
+        result += f"{c_secondary}Session:     {c_info}{cli_instance.session_id}{c_reset}\n"
+        msg_count = len(simple_memory.get_history(cli_instance.session_id)) if simple_memory and cli_instance.enable_memory else 0
+        result += f"{c_secondary}Messages in context: {c_primary}{msg_count}{c_reset}\n"
+        result += f"{c_secondary}Current working directory: {c_info}{os.getcwd()}{c_reset}\n"
         return result
     
     # Model command
@@ -538,6 +597,14 @@ Use //groq list or //ollama list to see available models"""
     # Ollama command
     @command("ollama", "Manage Ollama models", "//ollama <list|info>")
     def ollama_cmd(action: str = "list") -> str:
+        c = cli_instance.colors
+        c_primary = c.get('primary')
+        c_accent = c.get('accent')
+        c_info = c.get('info')
+        c_secondary = c.get('secondary')
+        c_error = c.get('error')
+        c_reset = c.get('reset')
+        
         if action == "list":
             try:
                 import subprocess
@@ -548,24 +615,37 @@ Use //groq list or //ollama list to see available models"""
                     timeout=10
                 )
                 if result.returncode == 0:
-                    return "\nAvailable Ollama Models:\n" + result.stdout
-                return f"Error listing Ollama models: {result.stderr}"
+                    output = f"\n{c_accent}╭{'─'*62}╮\n"
+                    output += f"│{c_primary}                 🦙 Available Ollama Models                {c_accent}│\n"
+                    output += f"╰{'─'*62}╯{c_reset}\n\n"
+                    output += f"{c_info}{result.stdout}{c_reset}"
+                    return output
+                return f"{c_error}Error listing Ollama models: {result.stderr}{c_reset}"
             except FileNotFoundError:
-                return "Ollama is not installed or not in PATH"
+                return f"{c_error}Ollama is not installed or not in PATH{c_reset}"
             except Exception as e:
-                return f"Error: {e}"
+                return f"{c_error}Error: {e}{c_reset}"
         return f"Unknown ollama action: {action}"
     
     # Groq command
     @command("groq", "Manage Groq models", "//groq list")
     def groq_cmd(action: str = "list") -> str:
+        c = cli_instance.colors
+        c_primary = c.get('primary')
+        c_accent = c.get('accent')
+        c_info = c.get('info')
+        c_secondary = c.get('secondary')
+        c_reset = c.get('reset')
+        
         if action == "list":
-            result = "\nAvailable Groq Models:\n"
-            result += "  • llama-3.3-70b-versatile\n"
-            result += "  • llama-3.1-70b-versatile\n"
-            result += "  • mixtral-8x7b-32768\n"
-            result += "  • gemma2-9b-it\n"
-            result += "\nUse: //model groq <model_name>"
+            result = f"\n{c_accent}╭{'─'*62}╮\n"
+            result += f"│{c_primary}                  ⚡ Available Groq Models                  {c_accent}│\n"
+            result += f"╰{'─'*62}╯{c_reset}\n\n"
+            result += f"{c_info}  • {c_secondary}llama-3.3-70b-versatile{c_reset}\n"
+            result += f"{c_info}  • {c_secondary}llama-3.1-70b-versatile{c_reset}\n"
+            result += f"{c_info}  • {c_secondary}mixtral-8x7b-32768{c_reset}\n"
+            result += f"{c_info}  • {c_secondary}gemma2-9b-it{c_reset}\n"
+            result += f"\n{c_accent}Use:{c_reset} {c_secondary}//model groq <model_name>{c_reset}"
             return result
         return f"Unknown groq action: {action}"
     
@@ -598,22 +678,200 @@ Use //groq list or //ollama list to see available models"""
     # Config command
     @command("config", "Show full configuration")
     def show_config() -> str:
-        result = "\n╔════════════════════════════════════════════════════════════╗\n"
-        result += "║                  ⚙️  Agent Configuration                   ║\n"
-        result += "╚════════════════════════════════════════════════════════════╝\n\n"
-        result += "Core Settings:\n"
-        result += f"  Name:        {agent_config.get('name', 'N/A')}\n"
-        result += f"  Provider:    {agent_config.get('provider', 'unknown')}\n"
-        result += f"  Model:       {agent_config.get('model_name', 'unknown')}\n"
-        result += f"  Temperature: {agent_config.get('temperature', 0.0)}\n\n"
-        result += "Features:\n"
-        result += f"  Memory: {'✓ Enabled' if agent_config.get('enable_memory') else '✗ Disabled'}\n"
-        result += f"  RAG:    {'✓ Enabled' if agent_config.get('enable_rag') else '✗ Disabled'}\n"
-        result += f"  Shell:  {'✓ Enabled' if agent_config.get('enable_shell') else '✗ Disabled'}\n\n"
-        result += "Toolboxes:\n"
+        c = cli_instance.colors
+        c_primary = c.get('primary')
+        c_accent = c.get('accent')
+        c_success = c.get('success')
+        c_info = c.get('info')
+        c_warning = c.get('warning')
+        c_secondary = c.get('secondary')
+        c_reset = c.get('reset')
+        
+        result = f"\n{c_accent}╭{'─'*62}╮\n"
+        result += f"│{c_primary}                  ⚙️  Agent Configuration                   {c_accent}│\n"
+        result += f"╰{'─'*62}╯{c_reset}\n\n"
+        result += f"{c_info}Core Settings:{c_reset}\n"
+        result += f"{c_secondary}  Name:{c_reset}        {c_primary}{agent_config.get('name', 'N/A')}{c_reset}\n"
+        result += f"{c_secondary}  Provider:{c_reset}    {c_accent}{agent_config.get('provider', 'unknown')}{c_reset}\n"
+        result += f"{c_secondary}  Model:{c_reset}       {c_accent}{agent_config.get('model_name', 'unknown')}{c_reset}\n"
+        result += f"{c_secondary}  Temperature:{c_reset} {c_warning}{agent_config.get('temperature', 0.0)}{c_reset}\n\n"
+        result += f"{c_info}Features:{c_reset}\n"
+        mem_icon = '✓' if agent_config.get('enable_memory') else '✗'
+        rag_icon = '✓' if agent_config.get('enable_rag') else '✗'
+        shell_icon = '✓' if agent_config.get('enable_shell') else '✗'
+        result += f"{c_secondary}  Memory:{c_reset} {c_success if agent_config.get('enable_memory') else c_warning}{mem_icon} {'Enabled' if agent_config.get('enable_memory') else 'Disabled'}{c_reset}\n"
+        result += f"{c_secondary}  RAG:{c_reset}    {c_success if agent_config.get('enable_rag') else c_warning}{rag_icon} {'Enabled' if agent_config.get('enable_rag') else 'Disabled'}{c_reset}\n"
+        result += f"{c_secondary}  Shell:{c_reset}  {c_success if agent_config.get('enable_shell') else c_warning}{shell_icon} {'Enabled' if agent_config.get('enable_shell') else 'Disabled'}{c_reset}\n\n"
+        result += f"{c_info}Toolboxes:{c_reset}\n"
         for tb in agent_config.get('toolboxes', []):
-            result += f"  • {tb}\n"
+            result += f"{c_accent}  • {tb}{c_reset}\n"
         return result
     
+    # Confirm command - control confirmation prompts for terminal and tools
+    @command("confirm", "Control confirmation prompts", "//confirm <terminal|tools> <on|off>")
+    def confirm_cmd(target: str = None, state: str = None) -> str:
+        """
+        Enable or disable confirmation prompts for terminal commands and tools.
+        
+        Usage:
+            //confirm terminal on   - Enable confirmation for terminal commands
+            //confirm terminal off  - Disable confirmation for terminal commands
+            //confirm tools on      - Enable confirmation for all other tools
+            //confirm tools off     - Disable confirmation for all other tools
+            //confirm               - Show current status
+        """
+        c = cli_instance.colors
+        c_primary = c.get('primary')
+        c_accent = c.get('accent')
+        c_success = c.get('success')
+        c_info = c.get('info')
+        c_warning = c.get('warning')
+        c_secondary = c.get('secondary')
+        c_reset = c.get('reset')
+        
+        if not target:
+            # Show current status with colors
+            terminal_status = f"{c_success}ON{c_reset}" if cli_instance.confirm_terminal else f"{c_warning}OFF{c_reset}"
+            tools_status = f"{c_success}ON{c_reset}" if cli_instance.confirm_tools else f"{c_warning}OFF{c_reset}"
+            whitelist_enabled = agent_config.get('whitelist_enabled', True)
+            whitelist_status = f"{c_success}ENABLED{c_reset}" if whitelist_enabled else f"{c_warning}DISABLED{c_reset}"
+            safe_count = len(agent_config.get('safe_commands', []))
+            
+            result = f"\n{c_accent}╭{'─'*62}╮\n"
+            result += f"│{c_primary}              🛡️  Confirmation Settings                     {c_accent}│\n"
+            result += f"╰{'─'*62}╯{c_reset}\n\n"
+            result += f"{c_info}Confirmation Modes:{c_reset}\n"
+            result += f"{c_secondary}  Terminal Commands:{c_reset} {terminal_status}\n"
+            result += f"{c_secondary}  Other Tools:{c_reset}       {tools_status}\n\n"
+            result += f"{c_info}Safe Command Whitelist:{c_reset} {whitelist_status}\n"
+            result += f"{c_secondary}  {safe_count} safe commands (no confirmation needed){c_reset}\n"
+            result += f"{c_accent}  Use //whitelist to manage safe commands{c_reset}\n\n"
+            result += f"{c_secondary}Usage:{c_reset}\n"
+            result += f"{c_accent}  //confirm terminal on/off{c_reset}  - Toggle terminal confirmation\n"
+            result += f"{c_accent}  //confirm tools on/off{c_reset}     - Toggle tools confirmation\n"
+            return result
+        
+        if target.lower() not in ['terminal', 'tools']:
+            return f"{c.get('error')}Error: Target must be 'terminal' or 'tools'\nUsage: //confirm <terminal|tools> <on|off>{c_reset}"
+        
+        if not state or state.lower() not in ['on', 'off']:
+            return f"{c.get('error')}Error: State must be 'on' or 'off'\nUsage: //confirm <terminal|tools> <on|off>{c_reset}"
+        
+        is_on = state.lower() == 'on'
+        
+        # Update the setting
+        if target.lower() == 'terminal':
+            cli_instance.confirm_terminal = is_on
+            agent_config['confirm_terminal'] = is_on
+            msg = f"{c_info}Terminal command confirmation:{c_reset} {c_success if is_on else c_warning}{'ENABLED' if is_on else 'DISABLED'}{c_reset}"
+        else:  # tools
+            cli_instance.confirm_tools = is_on
+            agent_config['confirm_tools'] = is_on
+            msg = f"{c_info}Tool confirmation:{c_reset} {c_success if is_on else c_warning}{'ENABLED' if is_on else 'DISABLED'}{c_reset}"
+        
+        # Save to config file
+        save_config_fn(agent_config)
+        
+        # Update confirmation callback handler with new settings
+        cli_instance.update_confirmation_settings(
+            confirm_terminal=agent_config.get('confirm_terminal'),
+            confirm_tools=agent_config.get('confirm_tools')
+        )
+        
+        return f"\n{c_success}✓{c_reset} {msg}\n{c_secondary}  Settings saved to agent_config.json{c_reset}"
+    
+    # Whitelist command - manage safe commands that skip confirmation
+    @command("whitelist", "Manage safe command whitelist", "//whitelist <on|off|list|add|remove> [command]")
+    def whitelist_cmd(action: str = "list", command: str = None) -> str:
+        """
+        Manage the whitelist of safe commands that don't require confirmation.
+        
+        Usage:
+            //whitelist              - Show all whitelisted commands
+            //whitelist on           - Enable whitelist (safe commands skip confirmation)
+            //whitelist off          - Disable whitelist (all commands require confirmation)
+            //whitelist list         - Show all whitelisted commands
+            //whitelist add <cmd>    - Add command to whitelist
+            //whitelist remove <cmd> - Remove command from whitelist
+        """
+        c = cli_instance.colors
+        c_primary = c.get('primary')
+        c_accent = c.get('accent')
+        c_success = c.get('success')
+        c_info = c.get('info')
+        c_warning = c.get('warning')
+        c_secondary = c.get('secondary')
+        c_error = c.get('error')
+        c_reset = c.get('reset')
+        
+        safe_commands = agent_config.get('safe_commands', [])
+        whitelist_enabled = agent_config.get('whitelist_enabled', True)
+        
+        if action.lower() == 'on':
+            agent_config['whitelist_enabled'] = True
+            save_config_fn(agent_config)
+            return f"\n{c_success}✓ Whitelist ENABLED{c_reset}\n{c_secondary}  Safe commands will skip confirmation{c_reset}"
+        
+        elif action.lower() == 'off':
+            agent_config['whitelist_enabled'] = False
+            save_config_fn(agent_config)
+            return f"\n{c_warning}✗ Whitelist DISABLED{c_reset}\n{c_secondary}  All commands will require confirmation (if enabled){c_reset}"
+        
+        elif action.lower() == 'list' or not action:
+            status_text = f"{c_success}ENABLED{c_reset}" if whitelist_enabled else f"{c_warning}DISABLED{c_reset}"
+            result = f"\n{c_accent}╭{'─'*62}╮\n"
+            result += f"│{c_primary}              ✅ Safe Command Whitelist                    {c_accent}│\n"
+            result += f"╰{'─'*62}╯{c_reset}\n\n"
+            result += f"{c_info}Status:{c_reset} {status_text}\n"
+            result += f"{c_secondary}These commands execute without confirmation:{c_reset}\n\n"
+            
+            for i, cmd in enumerate(safe_commands, 1):
+                result += f"{c_info}{i:3}.{c_reset} {c_secondary}{cmd}{c_reset}\n"
+            
+            result += f"\n{c_accent}Total: {c_primary}{len(safe_commands)}{c_accent} safe commands{c_reset}\n\n"
+            result += f"{c_secondary}Usage:{c_reset}\n"
+            result += f"{c_accent}  //whitelist on{c_reset}             - Enable whitelist\n"
+            result += f"{c_accent}  //whitelist off{c_reset}            - Disable whitelist\n"
+            result += f"{c_accent}  //whitelist add <command>{c_reset}    - Add to whitelist\n"
+            result += f"{c_accent}  //whitelist remove <command>{c_reset} - Remove from whitelist\n"
+            return result
+        
+        elif action.lower() == 'add':
+            if not command:
+                return f"{c_error}Error: Please specify a command to add\nUsage: //whitelist add <command>{c_reset}"
+            
+            if command in safe_commands:
+                return f"{c_warning}Command '{command}' is already in the whitelist{c_reset}"
+            
+            safe_commands.append(command)
+            agent_config['safe_commands'] = safe_commands
+            save_config_fn(agent_config)
+            
+            # Update the confirmation handler's whitelist
+            if hasattr(cli_instance, 'confirmation_handler'):
+                cli_instance.confirmation_handler._safe_commands = safe_commands
+            
+            return f"\n{c_success}✓ Added '{command}' to safe whitelist{c_reset}\n{c_secondary}  This command will no longer require confirmation{c_reset}"
+        
+        elif action.lower() == 'remove':
+            if not command:
+                return f"{c_error}Error: Please specify a command to remove\nUsage: //whitelist remove <command>{c_reset}"
+            
+            if command not in safe_commands:
+                return f"{c_error}Command '{command}' is not in the whitelist{c_reset}"
+            
+            safe_commands.remove(command)
+            agent_config['safe_commands'] = safe_commands
+            save_config_fn(agent_config)
+            
+            # Update the confirmation handler's whitelist
+            if hasattr(cli_instance, 'confirmation_handler'):
+                cli_instance.confirmation_handler._safe_commands = safe_commands
+            
+            return f"\n{c_success}✓ Removed '{command}' from whitelist{c_reset}\n{c_secondary}  This command will now require confirmation (if enabled){c_reset}"
+        
+        else:
+            return f"{c_error}Unknown action: {action}\nUsage: //whitelist <list|add|remove> [command]{c_reset}"
+    
     # Return all commands (help must be first to override the built-in)
-    return [show_help, list_tools, system_prompt_cmd, show_status, switch_model, memory_cmd, ollama_cmd, groq_cmd, rag_cmd, clear_screen, show_config]
+    return [show_help, list_tools, system_prompt_cmd, show_status, switch_model, memory_cmd, ollama_cmd, groq_cmd, rag_cmd, clear_screen, show_config, confirm_cmd, whitelist_cmd]
