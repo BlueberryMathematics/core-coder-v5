@@ -409,7 +409,7 @@ def create_cli_agent_commands(agent_instance, cli_instance, agent_config: dict, 
         result += f"{c_accent}  //status{c_reset}       {c_secondary}- Show agent status and configuration{c_reset}\n"
         result += f"{c_accent}  //config{c_reset}       {c_secondary}- Show full configuration{c_reset}\n"
         result += f"{c_accent}  //confirm      {c_accent}terminal|tools <on|off>{c_reset} {c_secondary}- Control confirmation prompts{c_reset}\n"
-        result += f"{c_accent}  //whitelist    {c_accent}on|off|add|remove{c_reset} {c_secondary}- Manage safe command whitelist{c_reset}\n"
+        result += f"{c_accent}  //whitelist    {c_accent}<on|off|list|add|remove> [command]{c_reset} {c_secondary}- Manage safe command whitelist{c_reset}\n"
         result += f"{c_accent}  //ollama       {c_accent}list{c_reset} {c_secondary}- List available Ollama models{c_reset}\n"
         result += f"{c_accent}  //groq         {c_accent}list{c_reset} {c_secondary}- List available Groq models{c_reset}\n"
         result += f"{c_accent}  //model        {c_accent}<provider> <name>{c_reset} {c_secondary}- Switch provider and model{c_reset}\n"
@@ -848,6 +848,7 @@ Use //groq list or //ollama list to see available models"""
             result += f"{c_accent}  //whitelist off{c_reset}            - Disable whitelist\n"
             result += f"{c_accent}  //whitelist add <command>{c_reset}    - Add to whitelist\n"
             result += f"{c_accent}  //whitelist remove <command>{c_reset} - Remove from whitelist\n"
+            result += f"{c_accent}  //whitelist list{c_reset}             - Show all whitelisted commands\n"
             return result
         
         elif action.lower() == 'add':
