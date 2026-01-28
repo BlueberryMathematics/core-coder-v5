@@ -29,6 +29,11 @@ load_dotenv()
 sys.path.insert(0, str(Path(__file__).parent / "langchain-agent-base" / "src"))
 sys.path.insert(0, str(Path(__file__).parent))
 
+# Ensure Dynamic Toolbox storage is anchored to the exported agent directory.
+# This prevents creating a `toolbox/` folder in whatever directory the user runs from.
+if not os.getenv("CORE_CODER_TOOLBOX_DIR") and not os.getenv("LANGCHAIN_AGENT_BASE_TOOLBOX_DIR"):
+    os.environ["CORE_CODER_TOOLBOX_DIR"] = str(Path(__file__).parent / "toolbox")
+
 from langchain_core.tools import tool
 from langchain_core.callbacks import BaseCallbackHandler
 from base import Agent

@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/home/owen/Projects/Side-projects/core-coder-v5/cli.py", line 25, in <module>
+    from dotenv import load_dotenv
+ModuleNotFoundError: No module named 'dotenv'

@@ -235,7 +235,7 @@ class ToolboxManager:
     """
     
     def __init__(self, 
-                 toolbox_dir: str = "toolbox",
+                 toolbox_dir: Optional[str] = None,
                  registry_file: str = "tool_registry.json",
                  auto_load: bool = True):
         """
@@ -246,21 +246,21 @@ class ToolboxManager:
             registry_file: JSON file to store tool metadata
             auto_load: Automatically load existing tools on init
         """
-        self.toolbox_dir = Path(toolbox_dir)
-        self.toolbox_dir.mkdir(exist_ok=True)
+        self.toolbox_dir = self._resolve_toolbox_dir(toolbox_dir)
         
-        # Create category directories
+        # Category directories (created lazily; see _ensure_dirs())
         self.categories = ['math', 'science', 'coding', 'rag', 'business', 'custom', 'generated']
-        for category in self.categories:
-            (self.toolbox_dir / category).mkdir(exist_ok=True)
         
         self.registry_file = self.toolbox_dir / registry_file
         self.registry: Dict[str, ToolMetadata] = {}
         self.tools: Dict[str, Callable] = {}  # name -> function
         
         if auto_load:
-            self._load_registry()
-            self._load_tools()
+            # IMPORTANT: Avoid creating directories on startup.
+            # Only load dynamic tools if the toolbox directory already exists.
+            if self.toolbox_dir.exists():
+                self._load_registry()
+                self._load_tools()
             
         # 🔗 BRIDGE: Auto-register predefined tools from tools.py
         # This unifies the two systems:
@@ -268,6 +268,51 @@ class ToolboxManager:
         # - toolbox.py: Dynamic LLM-generated tools
         # Both accessible via get_tools_by_category()
         self._register_predefined_tools()
+
+    @staticmethod
+    def _resolve_toolbox_dir(toolbox_dir: Optional[str]) -> Path:
+        """
+        Resolve toolbox directory location.
+        
+        Goals:
+        - Do NOT depend on current working directory by default (prevents littering random projects)
+        - Allow explicit override via parameter or environment variables
+        - Preserve backwards-compatibility if an existing ./toolbox is present
+        """
+        # 1) Explicit parameter wins
+        if toolbox_dir:
+            return Path(toolbox_dir).expanduser()
+        
+        # 2) Environment variable overrides
+        env_override = (
+            os.getenv("CORE_CODER_TOOLBOX_DIR")
+            or os.getenv("LANGCHAIN_AGENT_BASE_TOOLBOX_DIR")
+            or os.getenv("TOOLBOX_DIR")
+        )
+        if env_override:
+            return Path(env_override).expanduser()
+        
+        # 3) Back-compat: if an existing local toolbox is present, use it
+        cwd_toolbox = Path.cwd() / "toolbox"
+        if (cwd_toolbox / "tool_registry.json").exists():
+            return cwd_toolbox
+        
+        # 4) Default: user state directory (XDG-friendly) + langchain-agent-base/toolbox
+        # Use "state" because this is persistent user-generated agent state.
+        xdg_state = os.getenv("XDG_STATE_HOME")
+        if xdg_state:
+            base = Path(xdg_state).expanduser()
+        else:
+            base = Path.home() / ".local" / "state"
+        return base / "langchain-agent-base" / "toolbox"
+
+    def _ensure_dirs(self):
+        """Create toolbox directory structure if needed (lazy)."""
+        self.toolbox_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create category directories
+        for category in self.categories:
+            (self.toolbox_dir / category).mkdir(exist_ok=True)
     
     def _load_registry(self):
         """Load tool registry from disk."""
@@ -285,6 +330,7 @@ class ToolboxManager:
     def _save_registry(self):
         """Save tool registry to disk."""
         try:
+            self._ensure_dirs()
             with open(self.registry_file, 'w') as f:
                 data = {
                     name: asdict(meta) 
@@ -476,6 +522,9 @@ class ToolboxManager:
             tags=tags or [],
             dependencies=tool_info['dependencies']
         )
+        
+        # Ensure toolbox directories exist before writing any files
+        self._ensure_dirs()
         
         # Determine file path
         file_name = f"{tool_name}.py"
