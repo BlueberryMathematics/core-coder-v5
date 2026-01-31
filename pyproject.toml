@@ -49,6 +49,7 @@ dependencies = [
     # Environment & utilities
     "python-dotenv>=1.0.0",
     "colorama>=0.4.6",
+    "prompt_toolkit>=3.0.36",
     
     # Development tools
     "langgraph-cli[inmem]>=0.4.7",

@@ -410,6 +410,7 @@ def create_cli_agent_commands(agent_instance, cli_instance, agent_config: dict, 
         result += f"{c_accent}  //config{c_reset}       {c_secondary}- Show full configuration{c_reset}\n"
         result += f"{c_accent}  //confirm      {c_accent}terminal|tools <on|off>{c_reset} {c_secondary}- Control confirmation prompts{c_reset}\n"
         result += f"{c_accent}  //whitelist    {c_accent}<on|off|list|add|remove> [command]{c_reset} {c_secondary}- Manage safe command whitelist{c_reset}\n"
+        result += f"{c_accent}  //cd           {c_accent}<path>{c_reset} {c_secondary}- Change current working directory{c_reset}\n"
         result += f"{c_accent}  //ollama       {c_accent}list{c_reset} {c_secondary}- List available Ollama models{c_reset}\n"
         result += f"{c_accent}  //groq         {c_accent}list{c_reset} {c_secondary}- List available Groq models{c_reset}\n"
         result += f"{c_accent}  //model        {c_accent}<provider> <name>{c_reset} {c_secondary}- Switch provider and model{c_reset}\n"
@@ -888,5 +889,71 @@ Use //groq list or //ollama list to see available models"""
         else:
             return f"{c_error}Unknown action: {action}\nUsage: //whitelist <list|add|remove> [command]{c_reset}"
     
+    # CD command - change current working directory
+    @command("cd", "Change current working directory", "//cd <path>")
+    def cd_cmd(path: str = None) -> str:
+        """
+        Change the current working directory.
+        
+        Usage:
+            //cd                  - Show current directory
+            //cd <path>           - Change to specified directory
+            //cd ..               - Go up one directory
+            //cd ~                - Go to home directory
+        """
+        c = cli_instance.colors
+        c_primary = c.get('primary')
+        c_accent = c.get('accent')
+        c_success = c.get('success')
+        c_info = c.get('info')
+        c_error = c.get('error')
+        c_secondary = c.get('secondary')
+        c_reset = c.get('reset')
+        
+        if not path:
+            # Show current directory
+            current_dir = os.getcwd()
+            result = f"\n{c_info}Current working directory:{c_reset}\n"
+            result += f"{c_accent}{current_dir}{c_reset}\n"
+            return result
+        
+        try:
+            # Handle special paths
+            if path == '~':
+                path = os.path.expanduser('~')
+            elif path == '..':
+                path = os.path.dirname(os.getcwd())
+            else:
+                # Expand any ~ or environment variables in the path
+                path = os.path.expanduser(path)
+                path = os.path.expandvars(path)
+            
+            # Convert to absolute path if it's relative
+            if not os.path.isabs(path):
+                path = os.path.abspath(path)
+            
+            # Check if directory exists
+            if not os.path.exists(path):
+                return f"{c_error}Error: Directory does not exist: {path}{c_reset}"
+            
+            if not os.path.isdir(path):
+                return f"{c_error}Error: Not a directory: {path}{c_reset}"
+            
+            # Change directory
+            old_dir = os.getcwd()
+            os.chdir(path)
+            new_dir = os.getcwd()
+            
+            result = f"\n{c_success}✓ Changed directory{c_reset}\n"
+            result += f"{c_secondary}From:{c_reset} {c_info}{old_dir}{c_reset}\n"
+            result += f"{c_secondary}To:{c_reset}   {c_accent}{new_dir}{c_reset}\n"
+            
+            return result
+            
+        except PermissionError:
+            return f"{c_error}Error: Permission denied to access: {path}{c_reset}"
+        except Exception as e:
+            return f"{c_error}Error changing directory: {str(e)}{c_reset}"
+    
     # Return all commands (help must be first to override the built-in)
-    return [show_help, list_tools, system_prompt_cmd, show_status, switch_model, memory_cmd, ollama_cmd, groq_cmd, rag_cmd, clear_screen, show_config, confirm_cmd, whitelist_cmd]
+    return [show_help, list_tools, system_prompt_cmd, show_status, switch_model, memory_cmd, ollama_cmd, groq_cmd, rag_cmd, clear_screen, show_config, confirm_cmd, whitelist_cmd, cd_cmd]

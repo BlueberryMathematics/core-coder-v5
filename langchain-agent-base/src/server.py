@@ -7,13 +7,14 @@ tools, and commands. Provides a complete REST API for agent interactions.
 """
 
 from typing import Dict, List, Any, Optional
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 import uvicorn
 import asyncio
 from datetime import datetime
 import json
+import os
 
 from .protocol import (
     AgentRegistry, get_agent_registry, AgentCard, AgentStatus,
@@ -36,10 +37,15 @@ class AgentProtocolServer:
             redoc_url="/redoc"
         )
         
-        # Enable CORS
+        # Enable CORS for Next.js
         self.app.add_middleware(
             CORSMiddleware,
-            allow_origins=["*"],  # Configure appropriately for production
+            allow_origins=[
+                "http://localhost:3000",  # Next.js dev server
+                "http://localhost:3001",  # Alternative port
+                "http://127.0.0.1:3000",
+                "*"  # Allow all for development (restrict in production)
+            ],
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
@@ -253,6 +259,204 @@ class AgentProtocolServer:
                 return {"message": f"Session {session_id} cleared"}
             else:
                 raise HTTPException(status_code=404, detail="Session not found")
+        
+        # WebSocket endpoint for real-time chat with Next.js
+        @self.app.websocket("/ws/chat")
+        async def websocket_chat(websocket: WebSocket):
+            """
+            WebSocket endpoint for real-time bidirectional chat.
+            Perfect for Next.js terminal with live streaming responses.
+            
+            Message format:
+            Client → Server: {"message": "hello", "agent_name": "core-coder-v5", "session_id": "xyz"}
+            Server → Client: {"type": "agent_response", "content": "...", "ansi": true}
+                             {"type": "tool_start", "tool": "read_file", "input": {...}}
+                             {"type": "tool_output", "tool": "read_file", "output": "..."}
+                             {"type": "error", "message": "..."}
+            """
+            await websocket.accept()
+            
+            try:
+                while True:
+                    # Receive message from Next.js
+                    data = await websocket.receive_json()
+                    message = data.get("message", "")
+                    agent_name = data.get("agent_name", "default")
+                    agent_version = data.get("agent_version")
+                    session_id = data.get("session_id")
+                    
+                    if not message:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "Message is required"
+                        })
+                        continue
+                    
+                    try:
+                        # Get agent instance
+                        agent = self.registry.create_agent_instance(agent_name, agent_version)
+                        
+                        # Send typing indicator
+                        await websocket.send_json({
+                            "type": "agent_typing",
+                            "agent_name": agent_name
+                        })
+                        
+                        # Check if it's a command (starts with //)
+                        if message.startswith("//"):
+                            command_str = message[2:]
+                            
+                            # Execute command (will be added to agent in next step)
+                            if hasattr(agent, 'execute_command'):
+                                result = agent.execute_command(command_str)
+                            else:
+                                result = f"Command execution not supported: {command_str}"
+                            
+                            # Send command result with ANSI codes
+                            await websocket.send_json({
+                                "type": "command_result",
+                                "command": command_str,
+                                "result": result,
+                                "ansi": True  # Tells frontend to render ANSI codes
+                            })
+                        else:
+                            # Regular chat message - stream response
+                            if hasattr(agent, 'stream_chat'):
+                                # Streaming response
+                                for chunk in agent.stream_chat(message):
+                                    await websocket.send_json({
+                                        "type": "agent_chunk",
+                                        "content": chunk,
+                                        "done": False,
+                                        "ansi": True
+                                    })
+                                
+                                # Signal completion
+                                await websocket.send_json({
+                                    "type": "agent_chunk",
+                                    "content": "",
+                                    "done": True
+                                })
+                            else:
+                                # Non-streaming response
+                                response = agent.chat(message)
+                                await websocket.send_json({
+                                    "type": "agent_response",
+                                    "content": response,
+                                    "ansi": True
+                                })
+                        
+                        # Update session
+                        if session_id and hasattr(agent, 'get_card'):
+                            card = agent.get_card()
+                            self._update_session(session_id, message, "response", card)
+                        
+                    except Exception as e:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e)
+                        })
+                        
+            except WebSocketDisconnect:
+                print(f"WebSocket disconnected")
+            except Exception as e:
+                print(f"WebSocket error: {e}")
+                try:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": str(e)
+                    })
+                except:
+                    pass
+        
+        # Standalone command execution endpoint (for REST clients)
+        @self.app.post("/api/command")
+        async def execute_standalone_command(request: dict):
+            """
+            Execute commands like //cd, //tools, //status from Next.js.
+            
+            Request: {
+                "command": "cd",
+                "args": ["path/to/dir"],
+                "session_id": "xyz"
+            }
+            
+            Response: {
+                "result": "✓ Changed directory...",  // With ANSI codes
+                "success": true,
+                "cwd": "/new/path"  // Optional metadata
+            }
+            """
+            try:
+                command = request.get("command", "")
+                args = request.get("args", [])
+                session_id = request.get("session_id")
+                
+                if not command:
+                    raise HTTPException(status_code=400, detail="Command is required")
+                
+                # Import commands module
+                try:
+                    # This will be set up to work with your CLI commands
+                    from .commands import CommandRegistry
+                    
+                    # Create a command registry (you'll need to pass agent instance)
+                    # For now, we'll handle basic commands manually
+                    result = None
+                    metadata = {}
+                    
+                    if command == "cd":
+                        path = args[0] if args else None
+                        if path:
+                            try:
+                                old_dir = os.getcwd()
+                                os.chdir(os.path.expanduser(path))
+                                new_dir = os.getcwd()
+                                
+                                # Return ANSI-formatted result (matching your CLI)
+                                result = f"\033[32m✓ Changed directory\033[0m\n"
+                                result += f"\033[90mFrom:\033[0m \033[36m{old_dir}\033[0m\n"
+                                result += f"\033[90mTo:\033[0m   \033[35m{new_dir}\033[0m"
+                                metadata["cwd"] = new_dir
+                                metadata["old_cwd"] = old_dir
+                            except Exception as e:
+                                result = f"\033[31mError: {str(e)}\033[0m"
+                                raise HTTPException(status_code=400, detail=str(e))
+                        else:
+                            result = f"\033[36m{os.getcwd()}\033[0m"
+                            metadata["cwd"] = os.getcwd()
+                    
+                    elif command == "status":
+                        # Return status info
+                        result = "Agent status info..."  # You can populate this
+                        metadata["cwd"] = os.getcwd()
+                    
+                    elif command == "pwd" or command == "cwd":
+                        cwd = os.getcwd()
+                        result = f"\033[36m{cwd}\033[0m"
+                        metadata["cwd"] = cwd
+                    
+                    else:
+                        raise HTTPException(status_code=400, detail=f"Unknown command: {command}")
+                    
+                    return {
+                        "result": result,
+                        "success": True,
+                        "command": command,
+                        "ansi": True,
+                        **metadata
+                    }
+                    
+                except ImportError:
+                    raise HTTPException(status_code=500, detail="Commands module not available")
+                    
+            except Exception as e:
+                return {
+                    "result": f"\033[31mError: {str(e)}\033[0m",
+                    "success": False,
+                    "error": str(e),
+                    "ansi": True
+                }
         
         # Registry management endpoints
         @self.app.post("/agents/{agent_name}/versions/{version}/status")

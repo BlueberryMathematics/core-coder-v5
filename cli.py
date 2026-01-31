@@ -22,6 +22,16 @@ except (ImportError, AttributeError):
     from colorama import init, Fore, Style, Back
     init()
 
+# Import prompt_toolkit for enhanced input with tab completion
+try:
+    from prompt_toolkit import prompt
+    from prompt_toolkit.completion import PathCompleter, WordCompleter, Completer, Completion
+    from prompt_toolkit.formatted_text import ANSI
+    from prompt_toolkit.document import Document
+    PROMPT_TOOLKIT_AVAILABLE = True
+except ImportError:
+    PROMPT_TOOLKIT_AVAILABLE = False
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -559,7 +569,69 @@ class AgentCLI:
         # Setup command registry
         self.commands = setup_agent_commands(self.agent, self)
         
+        # Setup input completer for tab completion
+        if PROMPT_TOOLKIT_AVAILABLE:
+            self._setup_completer()
+        
         print(f"{self.colors.get('success')}Agent ready!{self.c_reset}\n")
+    
+    def _setup_completer(self):
+        """Setup tab completion for //cd and other commands."""
+        # Get list of command names for completion
+        command_names = [f"//{cmd}" for cmd in self.commands.commands.keys()]
+        self.command_completer = WordCompleter(
+            command_names,
+            ignore_case=True,
+            sentence=True
+        )
+        self.path_completer = PathCompleter(expanduser=True)
+        
+        # Create custom context-aware completer
+        class ContextAwareCompleter(Completer):
+            """Completer that switches between command and path completion based on context."""
+            def __init__(self, command_completer, path_completer):
+                self.command_completer = command_completer
+                self.path_completer = path_completer
+            
+            def get_completions(self, document, complete_event):
+                text = document.text_before_cursor
+                
+                # Check if we're completing a path after //cd
+                if text.startswith('//cd '):
+                    # Extract the path part after '//cd '
+                    path_text = text[5:]  # Everything after '//cd '
+                    # Create a new document with just the path
+                    path_doc = Document(path_text, len(path_text))
+                    for completion in self.path_completer.get_completions(path_doc, complete_event):
+                        yield completion
+                # If just starting or typing //, suggest commands
+                elif text.startswith('//') or text == '' or text == '/':
+                    for completion in self.command_completer.get_completions(document, complete_event):
+                        yield completion
+                # Otherwise, complete paths for regular input
+                else:
+                    for completion in self.path_completer.get_completions(document, complete_event):
+                        yield completion
+        
+        self.context_completer = ContextAwareCompleter(self.command_completer, self.path_completer)
+    
+    def _get_input(self, prompt_text: str) -> str:
+        """Get user input with smart tab completion."""
+        if not PROMPT_TOOLKIT_AVAILABLE:
+            return input(prompt_text).strip()
+        
+        try:
+            result = prompt(
+                ANSI(prompt_text),
+                completer=self.context_completer,
+                complete_while_typing=True,  # Show completions as you type
+                enable_history_search=True,  # Enable Ctrl+R history search
+                mouse_support=True,  # Enable mouse support for selection
+            )
+            return result.strip()
+        except Exception:
+            # Fallback to basic input if prompt_toolkit fails
+            return input(prompt_text).strip()
     
     def update_confirmation_settings(self, confirm_terminal: bool = None, confirm_tools: bool = None):
         """Update confirmation settings and recreate callback handler."""
@@ -633,8 +705,8 @@ class AgentCLI:
         
         while True:
             try:
-                # Get user input with colored label
-                user_input = input(f"\n{self.colors.get('info')}You: {self.c_reset}").strip()
+                # Get user input with colored label and tab completion
+                user_input = self._get_input(f"\n{self.colors.get('info')}You: {self.c_reset}")
                 
                 if not user_input:
                     continue
